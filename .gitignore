@@ -40,4 +40,4 @@ data/mnist/*
 data/MNIST/train
 data/MNIST/test
 
-./.ipynb_checkpoints
+./.ipynb_checkpoints/*

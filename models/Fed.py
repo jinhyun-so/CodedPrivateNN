@@ -16,6 +16,30 @@ def FedAvg(w):
         w_avg[k] = torch.div(w_avg[k], len(w))
     return w_avg
 
+def FedAvg_with_BACC_Dec(w, alpha_array, dec_z_array):
+    w_avg = copy.deepcopy(w[0])
+    dec_len = len(w)
+    for k in w_avg.keys():
+        tmp1 = w_avg[k].cpu().detach().numpy()
+        cur_shape = tmp1.shape
+
+        f_tilde = np.empty((dec_len,np.prod(cur_shape),1))
+
+        for i in range(dec_len):
+            tmp = w[i][k].cpu().detach().numpy()
+            f_tilde[i,:,:] = np.reshape(tmp,(np.prod(cur_shape),1))
+
+        f_dec = BACC_Dec(f_tilde, alpha_array, dec_z_array)
+        f_sum = np.sum(f_dec, axis=0)
+        f_mean = np.reshape(f_sum/dec_len,cur_shape)
+    
+        f_mean_tensor = torch.Tensor(f_mean).cuda()
+        
+        #print(w_avg[k][0])
+        #print(f_mean[0])
+
+        w_avg[k] += -w_avg[k] + f_mean_tensor
+    return w_avg
 
 def FedQAvg(w,q_val):
     w_avg = copy.deepcopy(w[0])
@@ -262,3 +286,41 @@ def my_score_Finite(w,m,q_bit,p):
     out = my_q_inv(dist_array,0,p)
     print(out)
 
+def BACC_Dec(_f_tilde, _alpha_array, _z_array):
+    '''
+    inputs:
+    
+    _f_tilde : numpy [_N * (shape of f) ]
+    _alpha_array : numpy [_K] array
+    _z_array     : numpy [_N] array
+    
+    Parameters:
+    _N : number of (non-straggling) worker nodes
+    _K : number of submatrices
+    
+    Outputs:
+    _f : numpy [_K * (shape of f)]    
+    '''
+    
+    _K = len(_alpha_array)
+    _N = len(_z_array)
+    
+    _N_, _m, _d = np.shape(_f_tilde)
+    
+    assert _N == _N_, "first dim of _f_tilde should be same as the length of _z_array!!\n"
+    
+    _f = np.zeros((_K,_m,_d))
+    
+    _W = np.ones((_K,_N))
+    _W[:,1::2] = -1
+    
+    _U = np.reshape(_alpha_array,(_K,1)) - np.reshape(_z_array,(1,_N))
+    _U = 1/_U
+    _U = _U * _W
+    
+    for i in range(_K):
+        denom =  np.sum(_U[i,:])
+        for j in range(_N):
+            _f[i,:,:] = _f[i,:,:] + _U[i,j]/denom * _f_tilde[j,:,:]
+            
+    return _f

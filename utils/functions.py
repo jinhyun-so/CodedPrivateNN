@@ -5,6 +5,72 @@ import copy
 import torch
 from torch import nn
 
+def PI(vals):  # upper-case PI -- product of inputs
+    accum = 1
+    for v in vals:
+        accum = accum*v
+    return accum
+
+def gen_Lagrange_coeffs(alpha_s,beta_s,is_K1=0):
+    if is_K1==1:
+        num_alpha = 1
+    else:
+        num_alpha = len(alpha_s)
+    U = np.zeros((num_alpha, len(beta_s)))
+#         U = [[0 for col in range(len(beta_s))] for row in range(len(alpha_s))]
+    #print(alpha_s)
+    #print(beta_s)
+    for i in range(num_alpha):
+        for j in range(len(beta_s)):
+            cur_beta = beta_s[j];
+
+            den = PI([cur_beta - o   for o in beta_s if cur_beta != o])
+            num = PI([alpha_s[i] - o for o in beta_s if cur_beta != o])
+            U[i][j] = num/den
+            # for debugging
+            # print(i,j,cur_beta,alpha_s[i])
+            # print(test)
+            # print(den,num) 
+    return U
+
+def LCC_Enc(_input_array, _alpha_array, _z_array):
+    '''
+    Inputs:
+    
+    _input_array : numpy [m * d] array
+    _alpha_array : numpy [_K] array
+    _z_array     : numpy [_N] array
+    
+    Parmeters:
+    _m : sample size
+    _d : feature size
+    _N : number of worker nodes
+    _K : number of submatrices 
+    
+    Output:
+    _X_tilde : numpy [_N * (m/_K) * d] array
+    
+    '''
+    _K = len(_alpha_array)
+    _N = len(_z_array)
+        
+    _m, _d = np.shape(_input_array)
+    
+    _m_i = np.floor(int(_m) / int(_K)).astype(int)
+    #print ('@BACC_Enc: N,K, m_i=',_N,_K,_m_i,'\n')
+    
+    assert _m_i >= 1, "data size(=m) should be larger than or equal to K \n"
+    
+    _X_tilde = np.zeros((_N,_m_i,_d))
+    
+    _U = gen_Lagrange_coeffs(_z_array,_alpha_array,is_K1=0)
+    
+    for i in range(_N):
+        for j in range(_K):
+            _X_tilde[i,:,:] = _X_tilde[i,:,:] + _U[i,j] * _input_array[_m_i*j:_m_i*(j+1),:]
+    
+    return _X_tilde
+
 def BACC_Enc(_input_array, _alpha_array, _z_array):
     '''
     Inputs:
@@ -217,6 +283,7 @@ def BACC_Dec(_f_tilde, _alpha_array, _z_array):
     
     _N_, _m, _d = np.shape(_f_tilde)
     
+    print('chekc the length!',_N, _N_)
     assert _N == _N_, "first dim of _f_tilde should be same as the length of _z_array!!\n"
     
     _f = np.zeros((_K,_m,_d))
@@ -308,7 +375,7 @@ def BACC_Enc_withNoise_v2(_input_array, _N, _K, _T, _sigma, _Noise_Alloc = None,
     # noise_idxs should be known to the server for decoding
     return BACC_Enc(_X_extended, _alpha_array, _z_array), _X_extended, noise_idxs
 
-def BACC_Enc_Data_v3(_input_array, _N, _K, _T, _sigma, _alpha_array, _z_array, _Noise_Alloc = None, _Noise = None, is_predefined_noise=False):
+def BACC_Enc_Data_v3(_input_array, _N, _K, _T, _sigma, _alpha_array, _z_array, _Noise_Alloc = None, _Noise = None, is_predefined_noise=False, _is_LCC = False):
     '''
     Inputs:
     
@@ -339,7 +406,10 @@ def BACC_Enc_Data_v3(_input_array, _N, _K, _T, _sigma, _alpha_array, _z_array, _
         noise_idxs = np.random.choice(range(_K+_T), _T, replace=False)
         noise_idxs = np.sort(noise_idxs)
     else:
-        noise_idxs = _Noise_Alloc    
+        noise_idxs = _Noise_Alloc
+    
+    if _T == 0:
+        noise_idxs = []
 
     _m, _d = np.shape(_input_array)
     
@@ -372,7 +442,10 @@ def BACC_Enc_Data_v3(_input_array, _N, _K, _T, _sigma, _alpha_array, _z_array, _
     
     # return _X_extended for debugging
     # noise_idxs should be known to the server for decoding
-    return BACC_Enc(_X_extended, _alpha_array, _z_array), _X_extended, noise_idxs
+    if _is_LCC == False:
+        return BACC_Enc(_X_extended, _alpha_array, _z_array), _X_extended, noise_idxs
+    else: 
+        return LCC_Enc(_X_extended, _alpha_array, _z_array), _X_extended, noise_idxs
 
 def BACC_Enc_Model_withNoise_v2(_net, _N, _K, _T, _sigma, _Noise_Alloc = None):
     '''
@@ -454,7 +527,7 @@ def BACC_Enc_Model_withNoise_v2(_net, _N, _K, _T, _sigma, _Noise_Alloc = None):
 
     return net_array
 
-def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array, _Noise_Alloc = None):
+def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array, _Noise_Alloc = None, _is_LCC = False):
     '''
     Inputs:
     
@@ -485,6 +558,8 @@ def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
     else:
         noise_idxs = _Noise_Alloc
 
+    if _T == 0:
+        noise_idxs = []
 
     net_array = []
     w_array = []
@@ -509,7 +584,11 @@ def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
                 _W_extended[i:(i+1),:] = np.random.normal(0,_sigma,size=(1,_d))
             else:
                 _W_extended[i:(i+1),:] = np.reshape(tmp1,(1,_d))
-        coded_W = BACC_Enc(_W_extended, _alpha_array, _z_array)
+
+        if _is_LCC == False:
+            coded_W = BACC_Enc(_W_extended, _alpha_array, _z_array)
+        else:
+            coded_W = LCC_Enc(_W_extended, _alpha_array, _z_array)
 
         #print(k)
         #print(np.shape(coded_W))
@@ -526,7 +605,7 @@ def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
 
     return net_array
 
-def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_array, _P, _sigma):
+def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_array, _P, _sigma, _is_LCC = False):
     '''
     Calculate the mutual information security
 
@@ -538,7 +617,7 @@ def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_arr
     - output:
     mutual information security (scalor value)
     '''
-    
+
     _t = len(_beta_array)
     _K = len(_alpha_array_Signal)
     _T = len(_alpha_array_Noise)
@@ -549,13 +628,16 @@ def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_arr
     _alpha_array = np.concatenate((_alpha_array_Signal,_alpha_array_Noise))
 #     print(_alpha_array)
     
-    _U = np.reshape(_beta_array,(_t,1)) - np.reshape(_alpha_array,(1,_K+_T))
-    _U = 1/_U
-    _U = _U * _W
+    if _is_LCC == False:
+        _U = np.reshape(_beta_array,(_t,1)) - np.reshape(_alpha_array,(1,_K+_T))
+        _U = 1/_U
+        _U = _U * _W
     
-    for i in range(_t):
-        denom = np.sum(_U[i,:])
-        _U[i,:] = _U[i,:] / denom
+        for i in range(_t):
+            denom = np.sum(_U[i,:])
+            _U[i,:] = _U[i,:] / denom
+    else:
+        _U = gen_Lagrange_coeffs(_beta_array,_alpha_array,is_K1=0)
     
     _L       = _U[:,0:_K]
     _L_tilde = _U[:,_K:_K+_T]
@@ -568,3 +650,64 @@ def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_arr
     _D = _P/_sigma * np.matmul(_SIG_tilde_Inv, _SIG)
         
     return np.log2(np.linalg.det(np.identity(_t) + _D))
+
+def PI(vals):  # upper-case PI -- product of inputs
+    accum = 1
+    for v in vals:
+        accum = accum*v
+    return accum
+
+def gen_Lagrange_coeffs(alpha_s,beta_s,is_K1=0):
+    if is_K1==1:
+        num_alpha = 1
+    else:
+        num_alpha = len(alpha_s)
+    U = np.zeros((num_alpha, len(beta_s)))
+#         U = [[0 for col in range(len(beta_s))] for row in range(len(alpha_s))]
+    #print(alpha_s)
+    #print(beta_s)
+    for i in range(num_alpha):
+        for j in range(len(beta_s)):
+            cur_beta = beta_s[j];
+
+            den = PI([cur_beta - o   for o in beta_s if cur_beta != o])
+            num = PI([alpha_s[i] - o for o in beta_s if cur_beta != o])
+            U[i][j] = num/den
+            # for debugging
+            # print(i,j,cur_beta,alpha_s[i])
+            # print(test)
+            # print(den,num) 
+    return U
+
+def LCC_Dec(_f_tilde, _alpha_array, _z_array):
+    '''
+    inputs:
+    
+    _f_tilde : numpy [_N * (shape of f) ]
+    _alpha_array : numpy [_K] array
+    _z_array     : numpy [_N] array
+    
+    Parameters:
+    _N : number of (non-straggling) worker nodes
+    _K : number of submatrices
+    
+    Outputs:
+    _f : numpy [_K * (shape of f)]    
+    '''
+    
+    _K = len(_alpha_array)
+    _N = len(_z_array)
+    
+    _N_, _m, _d = np.shape(_f_tilde)
+    
+    assert _N == _N_, "first dim of _f_tilde should be same as the length of _z_array!!\n"
+    
+    _f = np.zeros((_K,_m,_d))
+    
+    _U = gen_Lagrange_coeffs(_alpha_array,_z_array,is_K1=0)
+    
+    for i in range(_K):
+        for j in range(_N):
+            _f[i,:,:] = _f[i,:,:] + _U[i,j] * _f_tilde[j,:,:]
+            
+    return _f

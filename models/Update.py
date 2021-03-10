@@ -58,7 +58,7 @@ class LocalUpdate(object):
         if idxs == None:
             self.ldr_train = DataLoader(dataset, batch_size=self.args.local_bs, shuffle=True)
         else:
-            self.ldr_train = DataLoader(DatasetSplit(dataset, idxs), batch_size=self.args.local_bs, shuffle=True)
+            self.ldr_train = DataLoader(DatasetSplit(dataset, idxs), batch_size=self.args.local_bs, shuffle=False)
     
 
     def train(self, net):
@@ -141,6 +141,9 @@ class LocalUpdate_with_BACC(object):
                 images = torch.Tensor(images_np)
 
                 labels_np = self.y_train[stt_pos:end_pos,:]
+
+                #print(labels_np)
+
                 labels = torch.Tensor(labels_np)
 
                 if self.args.gpu:
@@ -168,5 +171,8 @@ class LocalUpdate_with_BACC(object):
                 '''
                 batch_loss.append(loss.item())
             epoch_loss.append(sum(batch_loss)/len(batch_loss))
+
+            #print(batch_loss)
+
         return net.state_dict(), sum(epoch_loss) / len(epoch_loss)
 

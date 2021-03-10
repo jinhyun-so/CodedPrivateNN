@@ -16,7 +16,48 @@ def FedAvg(w):
         w_avg[k] = torch.div(w_avg[k], len(w))
     return w_avg
 
-def FedAvg_with_BACC_Dec(w, alpha_array, dec_z_array):
+def FedAvg_with_BACC_Dec(w, alpha_array, dec_z_array, is_debug=False):
+    w_avg = copy.deepcopy(w[0])
+    dec_len = len(w)
+
+    K = len(alpha_array)
+    w_dec_array = [] # for debugging
+    for i in range(K):
+        w_tmp = copy.deepcopy(w[0])
+        w_dec_array.append(w_tmp)
+
+    for k in w_avg.keys():
+        tmp1 = w_avg[k].cpu().detach().numpy()
+        cur_shape = tmp1.shape
+
+        f_tilde = np.empty((dec_len,np.prod(cur_shape),1))
+
+        for i in range(dec_len):
+            tmp = w[i][k].cpu().detach().numpy()
+            f_tilde[i,:,:] = np.reshape(tmp,(np.prod(cur_shape),1))
+
+        f_dec = BACC_Dec(f_tilde, alpha_array, dec_z_array)
+
+        for i in range(K):
+            f_tmp = f_dec[i,:]
+            f_tmp = np.reshape(f_tmp,cur_shape)
+            f_tmp_tensor = torch.Tensor(f_tmp).cuda()
+            w_dec_array[i][k] += -w_dec_array[i][k] + f_tmp_tensor
+        f_sum = np.sum(f_dec, axis=0)
+        f_mean = np.reshape(f_sum/dec_len,cur_shape)
+    
+        f_mean_tensor = torch.Tensor(f_mean).cuda()
+        
+        #print(w_avg[k][0])
+        #print(f_mean[0])
+
+        w_avg[k] += -w_avg[k] + f_mean_tensor
+    if is_debug == True:
+        return w_avg, w_dec_array
+    else:
+        return w_avg
+
+def FedAvg_with_LCC_Dec(w, alpha_array, dec_z_array):
     w_avg = copy.deepcopy(w[0])
     dec_len = len(w)
     for k in w_avg.keys():
@@ -29,7 +70,8 @@ def FedAvg_with_BACC_Dec(w, alpha_array, dec_z_array):
             tmp = w[i][k].cpu().detach().numpy()
             f_tilde[i,:,:] = np.reshape(tmp,(np.prod(cur_shape),1))
 
-        f_dec = BACC_Dec(f_tilde, alpha_array, dec_z_array)
+        f_dec = LCC_Dec(f_tilde, alpha_array, dec_z_array)
+
         f_sum = np.sum(f_dec, axis=0)
         f_mean = np.reshape(f_sum/dec_len,cur_shape)
     
@@ -322,5 +364,66 @@ def BACC_Dec(_f_tilde, _alpha_array, _z_array):
         denom =  np.sum(_U[i,:])
         for j in range(_N):
             _f[i,:,:] = _f[i,:,:] + _U[i,j]/denom * _f_tilde[j,:,:]
+            
+    return _f
+
+def PI(vals):  # upper-case PI -- product of inputs
+    accum = 1
+    for v in vals:
+        accum = accum*v
+    return accum
+
+def gen_Lagrange_coeffs(alpha_s,beta_s,is_K1=0):
+    if is_K1==1:
+        num_alpha = 1
+    else:
+        num_alpha = len(alpha_s)
+    U = np.zeros((num_alpha, len(beta_s)))
+#         U = [[0 for col in range(len(beta_s))] for row in range(len(alpha_s))]
+    #print(alpha_s)
+    #print(beta_s)
+    for i in range(num_alpha):
+        for j in range(len(beta_s)):
+            cur_beta = beta_s[j];
+
+            den = PI([cur_beta - o   for o in beta_s if cur_beta != o])
+            num = PI([alpha_s[i] - o for o in beta_s if cur_beta != o])
+            U[i][j] = num/den
+            # for debugging
+            # print(i,j,cur_beta,alpha_s[i])
+            # print(test)
+            # print(den,num) 
+    return U
+
+def LCC_Dec(_f_tilde, _alpha_array, _z_array):
+    '''
+    inputs:
+    
+    _f_tilde : numpy [_N * (shape of f) ]
+    _alpha_array : numpy [_K] array
+    _z_array     : numpy [_N] array
+    
+    Parameters:
+    _N : number of (non-straggling) worker nodes
+    _K : number of submatrices
+    
+    Outputs:
+    _f : numpy [_K * (shape of f)]    
+    '''
+    
+    _K = len(_alpha_array)
+    _N = len(_z_array)
+    
+    _N_, _m, _d = np.shape(_f_tilde)
+    
+    assert _N == _N_, "first dim of _f_tilde should be same as the length of _z_array!!\n"
+    
+    _f = np.zeros((_K,_m,_d))
+    
+    _U = gen_Lagrange_coeffs(_alpha_array,_z_array,is_K1=0)
+    
+    for i in range(_K):
+        for j in range(_N):
+            _f[i,:,:] = _f[i,:,:] + _U[i,j] * _f_tilde[j,:,:]
             
     return _f

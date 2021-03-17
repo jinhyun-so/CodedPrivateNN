@@ -605,6 +605,89 @@ def BACC_Enc_Model_withNoise_v3(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
 
     return net_array
 
+def BACC_Enc_Model_withNoise_v4(_net, _N, _K, _T, _sigma, _alpha_array, _z_array, _Noise_Alloc = None, _is_LCC = False):
+    '''
+    Inputs:
+    
+    _net : pytorch model
+    _N : number of worker nodes
+    _K : number of submatrices 
+    _T : privacy parameter = number of random matrices
+    _sigma : variance
+
+    _alpha_array : numpy [_K+_T] array
+    _z_array     : numpy [_N] array
+
+    _Noise_Alloc : location of random matrices
+        if None: randomly assign (_T) locations out of ( _K + _T )
+        else: assign (_T) locations accordingly. 
+              e.g. when _K=3, T_2, it could be [0, 1, 0, 0, 1].
+
+    Parmeters:
+    
+    
+    Output:
+    _net_array : array of net, whose length is _N
+    '''
+
+    if _Noise_Alloc == None:
+        noise_idxs = np.random.choice(range(_K+_T), _T, replace=False)
+        noise_idxs = np.sort(noise_idxs)
+    else:
+        noise_idxs = _Noise_Alloc
+
+    if _T == 0:
+        noise_idxs = []
+
+    net_array = []
+    w_array = []
+
+    for n in range(_N):
+        net_tmp = copy.deepcopy(_net)
+        net_array.append(net_tmp)
+        w_array.append(net_tmp.state_dict())
+
+    net_tmp = copy.deepcopy(_net)
+    w_tmp = net_tmp.state_dict()
+
+    for k in w_tmp.keys():
+        tmp1 = w_tmp[k].cpu().detach().numpy()
+        cur_shape = tmp1.shape
+        _d = np.prod(cur_shape)
+
+        _W_extended = np.empty((1*(_K+_T),_d))
+
+        _w_cur = np.reshape(tmp1,(1,_d))
+        _cur_power = np.sum(_w_cur * _w_cur) / _d
+
+        print(k,_cur_power)
+
+        for i in range(_K+_T):
+            if i in noise_idxs:
+                _W_extended[i:(i+1),:] = np.random.normal(0,_cur_power*_sigma,size=(1,_d))
+            else:
+                _W_extended[i:(i+1),:] = _w_cur
+
+        if _is_LCC == False:
+            coded_W = BACC_Enc(_W_extended, _alpha_array, _z_array)
+        else:
+            coded_W = LCC_Enc(_W_extended, _alpha_array, _z_array)
+
+        #print(k)
+        #print(np.shape(coded_W))
+        #print()
+
+        for n in range(_N):
+            tmp = np.reshape(coded_W[n,0,:],cur_shape)
+            w_array[n][k] += - w_array[n][k] + torch.Tensor(tmp).cuda()
+
+            #print(n,k,w_array[n][k])
+
+    for n in range(_N):
+        net_array[n].load_state_dict(w_array[n])
+
+    return net_array
+
 def MutualInformationSecurity(_alpha_array_Signal, _alpha_array_Noise, _beta_array, _P, _sigma, _is_LCC = False):
     '''
     Calculate the mutual information security

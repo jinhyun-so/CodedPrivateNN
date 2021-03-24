@@ -118,7 +118,7 @@ class LocalUpdate_with_BACC(object):
         net.train()
         # train and update
         if self.args.opt == 'ADAM':
-            optimizer = torch.optim.Adam(net.parameters(), lr=self.args.lr, weight_decay=5e-4)
+            optimizer = torch.optim.Adam(net.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
         else:
             optimizer = torch.optim.SGD(net.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay = self.args.weight_decay)
         #optimizer = optim.Adam(net.parameters(), lr=0.001, weight_decay=5e-4)
@@ -137,7 +137,10 @@ class LocalUpdate_with_BACC(object):
                 stt_pos = batch_idx * self.args.local_bs
                 end_pos = (batch_idx + 1) * self.args.local_bs
                 images_np = self.X_train[stt_pos:end_pos,:]
-                images_np = np.reshape(images_np, (self.args.local_bs,1,28,28))
+                if self.args.dataset == 'mnist':
+                    images_np = np.reshape(images_np, (self.args.local_bs,1,28,28))
+                else:
+                    images_np = np.reshape(images_np, (self.args.local_bs,3,32,32))
                 images = torch.Tensor(images_np)
 
                 labels_np = self.y_train[stt_pos:end_pos,:]

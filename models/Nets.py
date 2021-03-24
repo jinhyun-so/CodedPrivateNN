@@ -125,7 +125,7 @@ class LeNet(nn.Module):
         return x
 
 
-class CNNCifar(nn.Module):
+class CNNCifar(nn.Module): # LeNet
     def __init__(self, args):
         super(CNNCifar, self).__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
@@ -143,4 +143,3 @@ class CNNCifar(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-

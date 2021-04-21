@@ -653,14 +653,15 @@ def BACC_Enc_Model_withNoise_v4(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
     for k in w_tmp.keys():
         tmp1 = w_tmp[k].cpu().detach().numpy()
         cur_shape = tmp1.shape
-        _d = np.prod(cur_shape)
+        _d = np.prod(cur_shape).astype('int')
 
+        #print(k,_d,cur_shape)
         _W_extended = np.empty((1*(_K+_T),_d))
 
         _w_cur = np.reshape(tmp1,(1,_d))
         _cur_power = np.sum(_w_cur * _w_cur) / _d
 
-        print(k,_cur_power)
+        #print(k,_cur_power)
 
         for i in range(_K+_T):
             if i in noise_idxs:
@@ -678,10 +679,19 @@ def BACC_Enc_Model_withNoise_v4(_net, _N, _K, _T, _sigma, _alpha_array, _z_array
         #print()
 
         for n in range(_N):
-            tmp = np.reshape(coded_W[n,0,:],cur_shape)
-            w_array[n][k] += - w_array[n][k] + torch.Tensor(tmp).cuda()
 
             #print(n,k,w_array[n][k])
+
+            if _d == 1:
+                tmp = coded_W[n,0,0]
+                w_array[n][k] += - w_array[n][k] + tmp.astype('long')
+
+                #print(w_array[n][k])
+            else:
+                tmp = np.reshape(coded_W[n,0,:],cur_shape)
+                w_array[n][k] += - w_array[n][k] + torch.Tensor(tmp).cuda()
+
+            
 
     for n in range(_N):
         net_array[n].load_state_dict(w_array[n])
@@ -794,3 +804,69 @@ def LCC_Dec(_f_tilde, _alpha_array, _z_array):
             _f[i,:,:] = _f[i,:,:] + _U[i,j] * _f_tilde[j,:,:]
             
     return _f
+
+
+
+def DP_Model(_net, _N, _sigma):
+    '''
+    Inputs:
+    
+    _net : pytorch model
+    _N : number of worker nodes
+    _sigma : variance
+    
+    
+    Output:
+    _net_array : array of net, whose length is _N
+    '''
+
+    net_array = []
+    w_array = []
+
+    for n in range(_N):
+        net_tmp = copy.deepcopy(_net)
+        net_array.append(net_tmp)
+        w_array.append(net_tmp.state_dict())
+
+    net_tmp = copy.deepcopy(_net)
+    w_tmp = net_tmp.state_dict()
+
+    for k in w_tmp.keys():
+        tmp1 = w_tmp[k].cpu().detach().numpy()
+        cur_shape = tmp1.shape
+        _d = np.prod(cur_shape).astype('int')
+
+        #print(k,_d,cur_shape)
+        _W_DP = np.empty((_N,_d))
+
+        _w_cur = np.reshape(tmp1,(1,_d))
+        _cur_power = np.sum(_w_cur * _w_cur) / _d
+
+        #print(k,_cur_power)
+
+        for i in range(_N):
+            _W_DP[i,:] = _w_cur + np.random.normal(0,_cur_power*_sigma,size=(_d))
+
+        #print(k)
+        #print(np.shape(coded_W))
+        #print()
+
+        for n in range(_N):
+
+            #print(n,k,w_array[n][k])
+
+            if _d == 1:
+                tmp = _W_DP[n,0]
+                w_array[n][k] += - w_array[n][k] + tmp.astype('long')
+
+                #print(w_array[n][k])
+            else:
+                tmp = np.reshape(_W_DP[n,:],cur_shape)
+                w_array[n][k] += - w_array[n][k] + torch.Tensor(tmp).cuda()
+
+            
+
+    for n in range(_N):
+        net_array[n].load_state_dict(w_array[n])
+
+    return net_array

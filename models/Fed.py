@@ -30,28 +30,49 @@ def FedAvg_with_BACC_Dec(w, alpha_array, dec_z_array, is_debug=False):
         tmp1 = w_avg[k].cpu().detach().numpy()
         cur_shape = tmp1.shape
 
-        f_tilde = np.empty((dec_len,np.prod(cur_shape),1))
+        d = np.prod(cur_shape).astype('int')
+
+        #print(k, d)
+        #print(cur_shape)
+
+        f_tilde = np.empty((dec_len,d,1))
 
         for i in range(dec_len):
             tmp = w[i][k].cpu().detach().numpy()
-            f_tilde[i,:,:] = np.reshape(tmp,(np.prod(cur_shape),1))
+            f_tilde[i,:,:] = np.reshape(tmp,(d,1))
 
         f_dec = BACC_Dec(f_tilde, alpha_array, dec_z_array)
 
         for i in range(K):
             f_tmp = f_dec[i,:]
-            f_tmp = np.reshape(f_tmp,cur_shape)
-            f_tmp_tensor = torch.Tensor(f_tmp).cuda()
-            w_dec_array[i][k] += -w_dec_array[i][k] + f_tmp_tensor
-        f_sum = np.sum(f_dec, axis=0)
-        f_mean = np.reshape(f_sum/dec_len,cur_shape)
-    
-        f_mean_tensor = torch.Tensor(f_mean).cuda()
-        
-        #print(w_avg[k][0])
-        #print(f_mean[0])
+            
 
-        w_avg[k] += -w_avg[k] + f_mean_tensor
+            if d == 1:
+                tmp = f_tmp[0][0]
+                #f_tmp_tensor = torch.Tensor(tmp).cuda()
+                #print(f_tmp_tensor)
+                #w_dec_array[i][k] += -w_dec_array[i][k] + f_tmp_tensor[0][0]
+                w_dec_array[i][k] += -w_dec_array[i][k] + tmp.astype('long')
+            else:
+                f_tmp = np.reshape(f_tmp,cur_shape)
+                f_tmp_tensor = torch.Tensor(f_tmp).cuda()
+                w_dec_array[i][k] += -w_dec_array[i][k] + f_tmp_tensor
+
+        if d == 1:
+            f_sum = np.sum(f_dec, axis=0)
+            f_mean = f_sum[0][0]/dec_len
+
+            w_avg[k] += -w_avg[k] + f_mean.astype('long')
+        else:
+            f_sum = np.sum(f_dec, axis=0)
+            f_mean = np.reshape(f_sum/dec_len,cur_shape)
+    
+            f_mean_tensor = torch.Tensor(f_mean).cuda()
+        
+            #print(w_avg[k][0])
+            #print(f_mean[0])
+
+            w_avg[k] += -w_avg[k] + f_mean_tensor
     if is_debug == True:
         return w_avg, w_dec_array
     else:
